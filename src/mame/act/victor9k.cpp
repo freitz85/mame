@@ -280,10 +280,12 @@ INPUT_PORTS_END
 #define DC_LOWINT   0x4000
 #define DC_RVS      0x8000
 
-MC6845_UPDATE_ROW( victor9k_state::crtc_update_row )
+void victor9k_state::crtc_update_row(bitmap_rgb32 &bitmap, const rectangle &cliprect, uint16_t ma, uint8_t ra, \
+									   uint16_t y, uint8_t x_count, int8_t cursor_x, int de, int hbp, int vbp)
+//MC6845_UPDATE_ROW( victor9k_state::crtc_update_row )
 {
-	int hires = BIT(ma, 13);
-	int dot_addr = BIT(ma, 12);
+	int hires = BIT(ma, 13);												// hires mode enabled
+	int dot_addr = BIT(ma, 12);												// 64k bank switch, 00000-0FFFF or 10000-1FFFF
 	int width = hires ? 16 : 10;
 
 	address_space &program = m_maincpu->space(AS_PROGRAM);
@@ -291,21 +293,21 @@ MC6845_UPDATE_ROW( victor9k_state::crtc_update_row )
 
 	int x = hbp;
 
-	offs_t aa = (ma & 0x7ff) << 1;
+	offs_t aa = (ma & 0x7ff) << 1;											// offset into video ram
 
 	for (int sx = 0; sx < x_count; sx++)
 	{
-		uint16_t dc = (m_video_ram[aa + 1] << 8) | m_video_ram[aa];
-		offs_t ab = (dot_addr << 15) | ((dc & 0x7ff) << 4) | (ra & 0x0f);
-		uint16_t dd = program.read_word(ab << 1);
+		uint16_t dc = (m_video_ram[aa + 1] << 8) | m_video_ram[aa];			// content of video ram
+		offs_t ab = (dot_addr << 15) | ((dc & 0x7ff) << 4) | (ra & 0x0f);	// offset into char ram
+		uint16_t dd = program.read_word(ab << 1);							// content of char ram
 
-		int cursor = (sx == cursor_x) ? 1 : 0;
-		int undln = !((dc & DC_UNDLN) && BIT(dd, 15)) ? 2 : 0;
-		int rvs = (dc & DC_RVS) ? 4 : 0;
-		int secret = (dc & DC_SECRET) ? 1 : 0;
-		int lowint = (dc & DC_LOWINT) ? 1 : 0;
+		int cursor = (sx == cursor_x) ? 1 : 0;								// cursor at current position
+		int undln = !((dc & DC_UNDLN) && BIT(dd, 15)) ? 2 : 0;				// underline enabled
+		int rvs = (dc & DC_RVS) ? 4 : 0;									// reverse enabled
+		int secret = (dc & DC_SECRET) ? 1 : 0;								// secret (hidden) enabled
+		int lowint = (dc & DC_LOWINT) ? 1 : 0;								// low intensity enabled
 
-		for (int bit = 0; bit < width; bit++)
+		for (int bit = 0; bit < width; bit++)								// loop through each bit in character line
 		{
 			int pixel = 0;
 
