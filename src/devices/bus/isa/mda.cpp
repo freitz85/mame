@@ -44,6 +44,7 @@
   Hercules video card
  */
 #define HERCULES_SCREEN_NAME "hercules_screen"
+#define VICTOR9K_SCREEN_NAME "victor_screen"
 #define MDA_CLOCK   XTAL(16'257'000)
 
 static const unsigned char mda_palette[4][3] =
@@ -752,6 +753,198 @@ uint8_t isa8_hercules_device::io_read(offs_t offset)
 		break;
 	}
 	return data;
+}
+
+DEFINE_DEVICE_TYPE(ISA8_VICTOR9K_GRAPHICS, isa8_victor9k_graphics_device, "isa_victor9k_graphics", "Victor 9000 Graphics Card")
+
+//-------------------------------------------------
+//  device_add_mconfig - add device configuration
+//-------------------------------------------------
+
+void isa8_victor9k_graphics_device::device_add_mconfig(machine_config &config)
+{
+	screen_device &screen(SCREEN(config, VICTOR9K_SCREEN_NAME, SCREEN_TYPE_RASTER));
+	screen.set_color(rgb_t::green());
+	screen.set_refresh_hz(72);
+	screen.set_vblank_time(ATTOSECONDS_IN_USEC(1200));
+	screen.set_size(800, 400);
+	screen.set_visarea(0, 799, 0, 399);
+	screen.set_screen_update(MC6845_NAME, FUNC(mc6845_device::screen_update));
+
+	PALETTE(config, m_palette).set_entries(4);
+
+	MC6845(config, m_crtc, 15_MHz_XTAL / 10);
+	m_crtc->set_screen(VICTOR9K_SCREEN_NAME);
+	m_crtc->set_show_border_area(false);
+	m_crtc->set_char_width(10);
+	m_crtc->set_visarea_adjust(0, 0, 0, 10);  //show line 25
+	m_crtc->set_update_row_callback(FUNC(isa8_victor9k_graphics_device::crtc_update_row));
+	m_crtc->out_hsync_callback().set(FUNC(isa8_mda_device::hsync_changed));
+	m_crtc->out_vsync_callback().set(FUNC(isa8_mda_device::vsync_changed));
+	m_crtc->set_begin_update_callback(FUNC(isa8_victor9k_graphics_device::crtc_begin_update));
+
+	GFXDECODE(config, "gfxdecode", m_palette, gfx_pcherc);
+}
+
+//**************************************************************************
+//  LIVE DEVICE
+//**************************************************************************
+
+//-------------------------------------------------
+//  isa8_victor9k_graphics_device - constructor
+//-------------------------------------------------
+
+isa8_victor9k_graphics_device::isa8_victor9k_graphics_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	isa8_mda_device(mconfig, ISA8_HERCULES, tag, owner, clock)
+{
+}
+
+//-------------------------------------------------
+//  device_start - device-specific startup
+//-------------------------------------------------
+
+void isa8_victor9k_graphics_device::device_start()
+{
+	if (m_palette != nullptr && !m_palette->started())
+		throw device_missing_dependencies();
+
+	m_videoram.resize(0x1000);
+	m_lowram.resize(0x20000);
+	set_isa_device();
+	m_isa->install_device(0x3b0, 0x3b1, read8sm_delegate(*this, FUNC(isa8_victor9k_graphics_device::io_read)), write8sm_delegate(*this, FUNC(isa8_victor9k_graphics_device::io_write)));
+	m_isa->install_bank(0xb0000, 0xb0fff, &m_videoram[0]);
+	m_isa->install_bank(0x90000, 0xaffff, &m_lowram[0]);
+
+	/* Initialise the mda palette */
+	for(int i = 0; i < (sizeof(mda_palette) / 3); i++)
+		m_palette->set_pen_color(i, mda_palette[i][0], mda_palette[i][1], mda_palette[i][2]);
+}
+
+//-------------------------------------------------
+//  device_reset - device-specific reset
+//-------------------------------------------------
+
+void isa8_victor9k_graphics_device::device_reset()
+{
+	isa8_mda_device::device_reset();
+
+	m_crtc->reset();
+}
+
+/***************************************************************************
+  Draw graphics with 720x348 pixels (default); so called Hercules gfx.
+  The memory layout is divided into 4 banks where of size 0x2000.
+  Every bank holds data for every n'th scanline, 8 pixels per byte,
+  bit 7 being the leftmost.
+***************************************************************************/
+
+#define DC_SECRET   0x1000
+#define DC_UNDLN    0x2000
+#define DC_LOWINT   0x4000
+#define DC_RVS      0x8000
+
+MC6845_UPDATE_ROW( isa8_victor9k_graphics_device::crtc_update_row )
+{
+	int hires = BIT(ma, 13);												// hires mode enabled
+	int dot_addr = BIT(ma, 12);												// 64k bank switch, 00000-0FFFF or 10000-1FFFF
+	int width = hires ? 16 : 10;
+
+	//address_space &program = m_maincpu->space(AS_PROGRAM);
+	const rgb_t *palette = m_palette->palette()->entry_list_raw();
+
+	int x = hbp;
+
+	offs_t aa = (ma & 0x7ff) << 1;											// offset into video ram
+
+	for (int sx = 0; sx < x_count; sx++)
+	{
+		uint16_t dc = (m_videoram[aa + 1] << 8) | m_videoram[aa];			// content of video ram
+		offs_t ab = (dot_addr << 15) | ((dc & 0x7ff) << 4) | (ra & 0x0f);	// offset into char ram
+		uint16_t dd = *(uint16_t*)(&m_lowram[ab << 1]);						// content of char ram
+
+		int cursor = (sx == cursor_x) ? 1 : 0;								// cursor at current position
+		int undln = !((dc & DC_UNDLN) && BIT(dd, 15)) ? 2 : 0;				// underline enabled
+		int rvs = (dc & DC_RVS) ? 4 : 0;									// reverse enabled
+		int secret = (dc & DC_SECRET) ? 1 : 0;								// secret (hidden) enabled
+		int lowint = (dc & DC_LOWINT) ? 1 : 0;								// low intensity enabled
+
+		for (int bit = 0; bit < width; bit++)								// loop through each bit in character line
+		{
+			int pixel = 0;
+
+			switch (rvs | undln | cursor)
+			{
+			case 0: case 5:
+				pixel = 1;
+				break;
+
+			case 1: case 4:
+				pixel = 0;
+				break;
+
+			case 2: case 7:
+				pixel = !(!(BIT(dd, bit) && !secret));
+				break;
+
+			case 3: case 6:
+				pixel = !(BIT(dd, bit) && !secret);
+				break;
+			}
+
+			int color = 0;
+
+			if (pixel && de)
+			{
+				int pen = lowint ? 2 : 3;
+				color = palette[pen];
+			}
+
+			bitmap.pix(vbp + y, x++) = color;
+		}
+
+		aa += 2;
+		aa &= 0xfff;
+	}
+}
+
+
+MC6845_BEGIN_UPDATE( isa8_victor9k_graphics_device::crtc_begin_update )
+{
+	uint16_t ma = m_crtc->get_ma();
+	int hires = BIT(ma, 13);
+	int width = hires ? 16 : 10;
+	if (hires != m_hires)
+	{
+		//LOGDISPLAY("mc6845 begin update change resolution: %s\n", hires ? "high" : "low");
+		m_crtc->set_hpixels_per_column(width);
+		m_crtc->set_char_width(width);
+		//m_crtc->set_visarea_adjust(0, 0, 0, 10);  //show line 25
+		m_hires = hires;
+	}
+}
+
+
+void isa8_victor9k_graphics_device::io_write(offs_t offset, uint8_t data)
+{
+	if(offset == 0)
+	{
+		m_crtc->address_w(data);
+	}
+	else
+	{
+		m_crtc->register_w(data);
+	}
+}
+
+
+uint8_t isa8_victor9k_graphics_device::io_read(offs_t offset)
+{
+	if(offset == 0)
+	{
+		return m_crtc->status_r();
+	}
+
+	return m_crtc->register_r();
 }
 
 DEFINE_DEVICE_TYPE(ISA8_EC1840_0002, isa8_ec1840_0002_device, "ec1840_0002", "EC1840.0002 (MDA)")

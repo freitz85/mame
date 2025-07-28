@@ -108,6 +108,40 @@ private:
 // device type definition
 DECLARE_DEVICE_TYPE(ISA8_HERCULES, isa8_hercules_device)
 
+// ======================> isa8_victor9k_graphics_device
+
+class isa8_victor9k_graphics_device :
+		public isa8_mda_device
+{
+public:
+	// construction/destruction
+	isa8_victor9k_graphics_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
+
+	virtual uint8_t io_read(offs_t offset) override;
+	virtual void io_write(offs_t offset, uint8_t data) override;
+
+protected:
+	// device-level overrides
+	virtual void device_start() override ATTR_COLD;
+	virtual void device_reset() override ATTR_COLD;
+
+	// optional information overrides
+	virtual void device_add_mconfig(machine_config &config) override ATTR_COLD;
+
+private:
+	virtual MC6845_UPDATE_ROW( crtc_update_row ) override;
+	MC6845_BEGIN_UPDATE( crtc_begin_update );
+
+	int m_hires;
+
+public:
+	std::vector<uint8_t> m_lowram;
+};
+
+
+// device type definition
+DECLARE_DEVICE_TYPE(ISA8_VICTOR9K_GRAPHICS, isa8_victor9k_graphics_device)
+
 // ======================> isa8_ec1840_0002_device
 
 class isa8_ec1840_0002_device :

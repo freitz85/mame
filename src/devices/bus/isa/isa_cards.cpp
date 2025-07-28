@@ -156,6 +156,7 @@ void pc_isa8_cards(device_slot_interface &device)
 	device.option_add("acb2072", ACB2072);
 	device.option_add("3xtwin", ISA8_3XTWIN);
 	device.option_add("opus108pm", ISA8_OPUS108PM);
+	device.option_add("v9k_graphics", ISA8_VICTOR9K_GRAPHICS);
 }
 
 void pc_isa16_cards(device_slot_interface &device)
@@ -205,6 +206,7 @@ void pc_isa16_cards(device_slot_interface &device)
 	device.option_add("3xtwin", ISA8_3XTWIN);
 	device.option_add("opus108pm", ISA8_OPUS108PM);
 	device.option_add("ibm_speech", ISA8_IBM_SPEECH);
+	device.option_add("v9k_graphics", ISA8_VICTOR9K_GRAPHICS);
 	// 16-bit
 	device.option_add("ide", ISA16_IDE);
 	device.option_add("ne2000", NE2000);
